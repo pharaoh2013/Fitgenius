@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FitGenius - Science Training</title>
+    <title>FitGenius - The Masterpiece Edition</title>
     
-    <!-- โหลดเฉพาะไฟล์หลักที่เสถียรที่สุด -->
+    <!-- โหลดไลบรารีแบบ Fallback ป้องกันการโหลดไม่สำเร็จ -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,432 +13,746 @@
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { 
-            font-family: 'Inter', sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none;
-        }
+        body { font-family: 'Inter', sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .animate-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
-        #loading { position: fixed; inset: 0; background: #09090b; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s; }
-        .spinner { width: 40px; height: 40px; border: 4px solid #27272a; border-top: 4px solid #d4f04d; border-radius: 50%; animation: spin 1s linear infinite; }
+        #fallback-ui { position: fixed; inset: 0; background: #09090b; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.4s; }
+        .spinner { width: 45px; height: 45px; border: 4px solid #27272a; border-top: 4px solid #d4f04d; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .done-input { background-color: transparent !important; color: #52525b !important; border-color: transparent !important; }
+        select { -webkit-appearance: none; appearance: none; background-color: transparent; text-align: center; text-align-last: center; }
+        select option { background-color: #18181b; color: white; }
     </style>
 </head>
 <body>
-    <div id="loading">
-        <div class="spinner"></div>
-        <p style="color: #71717a; font-size: 10px; margin-top: 20px; font-weight: bold; letter-spacing: 2px;">STARTING ENGINE...</p>
-        <button onclick="localStorage.clear(); window.location.reload();" style="margin-top: 30px; padding: 10px 20px; background: #ef4444; color: #fff; border-radius: 10px; border: none; font-size: 12px; font-weight: bold;">⚠️ ล้างข้อมูลที่ค้าง</button>
+    <!-- ระบบกู้ภัยฉุกเฉิน (ถ้าจอดำ ปุ่มนี้จะโผล่มาช่วย) -->
+    <div id="fallback-ui">
+        <div class="spinner" id="spinner-icon"></div>
+        <p style="color: #71717a; font-size: 11px; margin-top: 20px; font-weight: 900; letter-spacing: 2px;" id="loading-txt">INITIALIZING...</p>
+        <div id="emergency-btn" style="display: none; text-align: center; margin-top: 20px;">
+            <p style="color: #ef4444; font-size: 12px; margin-bottom: 10px;">⚠️ ตรวจพบระบบขัดข้อง (แครช)</p>
+            <button onclick="localStorage.clear(); window.location.reload();" style="padding: 12px 24px; background: #ef4444; color: #fff; border-radius: 20px; border: none; font-size: 12px; font-weight: bold; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">ล้างข้อมูลและรีสตาร์ทแอป</button>
+        </div>
     </div>
 
     <div id="root"></div>
 
+    <script>
+        // Emergency Timer: โชว์ปุ่มรีเซ็ตถ้าโหลดเกิน 4 วิ
+        window.emergencyTimeout = setTimeout(() => {
+            if(document.getElementById('fallback-ui').style.display !== 'none') {
+                document.getElementById('spinner-icon').style.display = 'none';
+                document.getElementById('loading-txt').style.display = 'none';
+                document.getElementById('emergency-btn').style.display = 'block';
+            }
+        }, 4000);
+    </script>
+
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+        try {
+            const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- 1. ฝังไอคอนทุกตัวลงในแอพ (โหลดไว ไม่ต้องพึ่งเน็ต ไม่เสี่ยงพัง) ---
-        const SvgIcon = ({ children, size=24, className="", fill="none", strokeWidth=2 }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
-        );
+            // --- 1. ERROR BOUNDARY ---
+            class ErrorBoundary extends React.Component {
+                constructor(props) { super(props); this.state = { hasError: false, errorInfo: null }; }
+                static getDerivedStateFromError(error) { return { hasError: true, errorInfo: error.toString() }; }
+                render() {
+                    if (this.state.hasError) {
+                        return (
+                            <div style={{ padding: '30px', textAlign: 'center', color: '#ef4444', backgroundColor: '#09090b', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                <h2 style={{ fontSize: '24px', fontWeight: '900', marginBottom: '10px' }}>⚠️ REACT CRASH</h2>
+                                <p style={{ fontSize: '10px', color: '#a1a1aa', marginBottom: '20px' }}>{this.state.errorInfo}</p>
+                                <button onClick={() => { localStorage.clear(); window.location.reload(); }} style={{ background: '#ef4444', color: 'white', padding: '12px 24px', borderRadius: '20px', fontWeight: 'bold', border: 'none' }}>RESET APP</button>
+                            </div>
+                        );
+                    }
+                    return this.props.children;
+                }
+            }
 
-        const Home = p => <SvgIcon {...p}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></SvgIcon>;
-        const Layers = p => <SvgIcon {...p}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></SvgIcon>;
-        const HistoryIcon = p => <SvgIcon {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></SvgIcon>;
-        const Database = p => <SvgIcon {...p}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></SvgIcon>;
-        const Settings = p => <SvgIcon {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></SvgIcon>;
-        const Activity = p => <SvgIcon {...p}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></SvgIcon>;
-        const Star = p => <SvgIcon {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></SvgIcon>;
-        const TrendingUp = p => <SvgIcon {...p}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></SvgIcon>;
-        const Brain = p => <SvgIcon {...p}><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4.5 4.5 4.5 0 0 1-3 4.5"/></SvgIcon>;
-        const Trash = p => <SvgIcon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></SvgIcon>;
-        const Plus = p => <SvgIcon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></SvgIcon>;
-        const Check = p => <SvgIcon {...p}><polyline points="20 6 9 17 4 12"/></SvgIcon>;
-        const X = p => <SvgIcon {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></SvgIcon>;
-        const ArrowUp = p => <SvgIcon {...p}><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></SvgIcon>;
-        const ArrowDown = p => <SvgIcon {...p}><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></SvgIcon>;
-        const ChevronUp = p => <SvgIcon {...p}><polyline points="18 15 12 9 6 15"/></SvgIcon>;
-        const ChevronDown = p => <SvgIcon {...p}><polyline points="6 9 12 15 18 9"/></SvgIcon>;
-        const Search = p => <SvgIcon {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></SvgIcon>;
-        const Clock = p => <SvgIcon {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></SvgIcon>;
-        const Lock = p => <SvgIcon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></SvgIcon>;
-        const Unlock = p => <SvgIcon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></SvgIcon>;
-        const Save = p => <SvgIcon {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></SvgIcon>;
-        const Download = p => <SvgIcon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></SvgIcon>;
-        const Upload = p => <SvgIcon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></SvgIcon>;
-        const Award = p => <SvgIcon {...p}><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></SvgIcon>;
-        const Target = p => <SvgIcon {...p}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></SvgIcon>;
+            // --- 2. NATIVE ICONS ---
+            const Svg = ({ d, size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{__html: d}} />;
+            
+            const Icons = {
+                Home: p => <Svg d='<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>' {...p}/>,
+                Layers: p => <Svg d='<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>' {...p}/>,
+                History: p => <Svg d='<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>' {...p}/>,
+                Chart: p => <Svg d='<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>' {...p}/>,
+                Settings: p => <Svg d='<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>' {...p}/>,
+                Activity: p => <Svg d='<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>' {...p}/>,
+                Star: p => <Svg d='<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>' {...p}/>,
+                TrendingUp: p => <Svg d='<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>' {...p}/>,
+                Brain: p => <Svg d='<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4.5 4.5 4.5 0 0 1-3 4.5"/>' {...p}/>,
+                Trash: p => <Svg d='<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>' {...p}/>,
+                Plus: p => <Svg d='<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>' {...p}/>,
+                Check: p => <Svg d='<polyline points="20 6 9 17 4 12"/>' {...p}/>,
+                X: p => <Svg d='<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>' {...p}/>,
+                ArrowUp: p => <Svg d='<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>' {...p}/>,
+                ArrowDown: p => <Svg d='<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>' {...p}/>,
+                ChevronUp: p => <Svg d='<polyline points="18 15 12 9 6 15"/>' {...p}/>,
+                ChevronDown: p => <Svg d='<polyline points="6 9 12 15 18 9"/>' {...p}/>,
+                Clock: p => <Svg d='<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>' {...p}/>,
+                Award: p => <Svg d='<circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>' {...p}/>,
+                Target: p => <Svg d='<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>' {...p}/>,
+                Edit: p => <Svg d='<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>' {...p}/>,
+                Flame: p => <Svg d='<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>' {...p}/>,
+                Lock: p => <Svg d='<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>' {...p}/>,
+                Unlock: p => <Svg d='<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>' {...p}/>,
+                Download: p => <Svg d='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>' {...p}/>,
+                Upload: p => <Svg d='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' {...p}/>,
+                Save: p => <Svg d='<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>' {...p}/>
+            };
 
-        // --- 2. CONFIG & DB ---
-        const MUSCLE_GROUPS = ['All', 'Chest', 'Back', 'Quads', 'Hamstrings', 'Glutes', 'Shoulders', 'Biceps', 'Triceps', 'Abs', 'Calves', 'Adductors', 'Abductors'];
-        
-        const MASTER_DB = [
-            { id: 'ex1', name: 'Leg Press', muscle: 'Quads', type: 'Compound', defaultRest: 120 },
-            { id: 'ex2', name: 'Seated Cable RDL', muscle: 'Hamstrings', type: 'Compound', defaultRest: 120 },
-            { id: 'ex3', name: 'Leg Extension', muscle: 'Quads', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex4', name: 'Machine Adduction', muscle: 'Adductors', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex5', name: 'Machine Abduction', muscle: 'Abductors', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex6', name: 'Lying Hamstring Curl', muscle: 'Hamstrings', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex7', name: 'Smith Incline Press', muscle: 'Chest', type: 'Compound', defaultRest: 120 },
-            { id: 'ex8', name: 'T-Bar Row', muscle: 'Back', type: 'Compound', defaultRest: 120 },
-            { id: 'ex9', name: 'Dumbbell Shoulder Press', muscle: 'Shoulders', type: 'Compound', defaultRest: 120 },
-            { id: 'ex10', name: 'Lat Pulldown', muscle: 'Back', type: 'Compound', defaultRest: 120 },
-            { id: 'ex11', name: 'Cable Face Pull', muscle: 'Back', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex12', name: 'Machine Chest Fly', muscle: 'Chest', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex13', name: 'Tricep Pushdown', muscle: 'Triceps', type: 'Isolation', defaultRest: 120 },
-            { id: 'ex14', name: 'Dumbbell Curl', muscle: 'Biceps', type: 'Isolation', defaultRest: 120 }
-        ];
+            // --- 3. DB ---
+            const MUSCLE_GROUPS = ['All', 'Chest', 'Back', 'Quads', 'Hamstrings', 'Glutes', 'Shoulders', 'Biceps', 'Triceps', 'Abs', 'Calves', 'Adductors', 'Abductors'];
+            const MASTER_DB = [
+                { id: 'ex1', name: 'Leg Press', muscle: 'Quads', type: 'Compound', defaultRest: 120 },
+                { id: 'ex2', name: 'Seated Cable RDL', muscle: 'Hamstrings', type: 'Compound', defaultRest: 120 },
+                { id: 'ex3', name: 'Leg Extension', muscle: 'Quads', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex4', name: 'Machine Adduction', muscle: 'Adductors', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex5', name: 'Machine Abduction', muscle: 'Abductors', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex6', name: 'Lying Hamstring Curl', muscle: 'Hamstrings', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex7', name: 'Smith Incline Press', muscle: 'Chest', type: 'Compound', defaultRest: 120 },
+                { id: 'ex8', name: 'T-Bar Row', muscle: 'Back', type: 'Compound', defaultRest: 120 },
+                { id: 'ex9', name: 'Dumbbell Shoulder Press', muscle: 'Shoulders', type: 'Compound', defaultRest: 120 },
+                { id: 'ex10', name: 'Lat Pulldown', muscle: 'Back', type: 'Compound', defaultRest: 120 },
+                { id: 'ex11', name: 'Cable Face Pull', muscle: 'Back', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex12', name: 'Machine Chest Fly', muscle: 'Chest', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex13', name: 'Tricep Pushdown', muscle: 'Triceps', type: 'Isolation', defaultRest: 120 },
+                { id: 'ex14', name: 'Dumbbell Curl', muscle: 'Biceps', type: 'Isolation', defaultRest: 120 }
+            ];
 
-        // --- 3. ERROR BOUNDARY ---
-        class ErrorBoundary extends React.Component {
-            constructor(props) { super(props); this.state = { hasError: false }; }
-            static getDerivedStateFromError() { return { hasError: true }; }
-            render() {
-                if (this.state.hasError) {
+            // --- 4. MAIN APP ENGINE ---
+            function App() {
+                const [view, setView] = useState('home');
+                const [modal, setModal] = useState(null);
+
+                const safeGetJSON = (key, fallback) => {
+                    try { const val = window.localStorage.getItem(key); return val ? JSON.parse(val) : fallback; } 
+                    catch (e) { return fallback; }
+                };
+
+                // States (คีย์ v34)
+                const [logs, setLogs] = useState(() => safeGetJSON('fg_v34_logs', []));
+                const [routines, setRoutines] = useState(() => safeGetJSON('fg_v34_routines', []));
+                const [favorites, setFavorites] = useState(() => safeGetJSON('fg_v34_favs', []));
+                const [collapsed, setCollapsed] = useState(() => safeGetJSON('fg_v34_coll', []));
+                
+                const [apiKey, setApiKey] = useState(() => { try { return window.localStorage.getItem('fg_v34_key') || ''; } catch(e) { return ''; }});
+                const [isLocked, setIsLocked] = useState(() => { try { return window.localStorage.getItem('fg_v34_lock') === 'true'; } catch(e) { return false; }});
+                
+                const [activeSession, setActiveSession] = useState(null);
+                const [editingLogId, setEditingLogId] = useState(null); 
+                const [rest, setRest] = useState(0);
+                
+                const [isAnalyzing, setIsAnalyzing] = useState(false);
+                const [analysisResult, setAnalysisResult] = useState(null);
+
+                const [picker, setPicker] = useState(null);
+                const [formName, setFormName] = useState('');
+
+                const allDB = useMemo(() => MASTER_DB, []);
+
+                // ถอดหน้า Loading ทิ้งทันทีที่ React เริ่มทำงาน
+                useEffect(() => {
+                    clearTimeout(window.emergencyTimeout);
+                    const loader = document.getElementById('fallback-ui');
+                    if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.style.display = 'none', 300); }
+                }, []);
+
+                // Save Data Effect
+                useEffect(() => {
+                    const safeSet = (k, v) => { try { window.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch(e){} };
+                    safeSet('fg_v34_logs', logs);
+                    safeSet('fg_v34_routines', routines);
+                    safeSet('fg_v34_favs', favorites);
+                    safeSet('fg_v34_coll', collapsed);
+                    safeSet('fg_v34_key', apiKey);
+                    safeSet('fg_v34_lock', isLocked ? 'true' : 'false');
+                }, [logs, routines, favorites, collapsed, apiKey, isLocked]);
+
+                useEffect(() => {
+                    if (rest <= 0) return;
+                    const timerId = setInterval(() => setRest(r => r - 1), 1000);
+                    return () => clearInterval(timerId);
+                }, [rest]);
+
+                // --- 🌟 LOGIC: AUTO-FILL WEIGHT FROM HISTORY 🌟 ---
+                const startWorkout = (routineObj = null) => {
+                    const warmedGroups = new Set();
+                    const safeRoutine = routineObj || { name: 'FREESTYLE', exercises: [] };
+                    
+                    const session = {
+                        id: Date.now(), name: safeRoutine.name, startTime: Date.now(),
+                        exercises: (safeRoutine.exercises || []).map(item => {
+                            const ref = allDB.find(e => e.id === item.id) || { name: 'Unknown Move', muscle: 'Other', defaultRest: 120 };
+                            const needsWarmup = !warmedGroups.has(ref.muscle);
+                            if (needsWarmup) warmedGroups.add(ref.muscle);
+
+                            // ค้นหาน้ำหนักที่เคยเล่นรอบที่แล้ว
+                            let pastWeight = '';
+                            for (let i = 0; i < logs.length; i++) {
+                                const pastEx = logs[i].exercises.find(e => e.name === ref.name);
+                                if (pastEx && pastEx.sets) {
+                                    const pastWorkSet = pastEx.sets.find(s => s.type === 'work' && s.weight);
+                                    if (pastWorkSet) { pastWeight = pastWorkSet.weight; break; }
+                                }
+                            }
+
+                            const sets = [];
+                            if (needsWarmup) {
+                                sets.push({ id: Math.random(), weight: pastWeight ? Math.round(parseFloat(pastWeight) * 0.3) : '', reps: '15', rir: '', done: false, type: 'warmup', isManualWeight: false });
+                                sets.push({ id: Math.random(), weight: pastWeight ? Math.round(parseFloat(pastWeight) * 0.6) : '', reps: '8', rir: '', done: false, type: 'warmup', isManualWeight: false });
+                            }
+                            sets.push({ id: Math.random(), weight: pastWeight, reps: '', rir: '', done: false, type: 'work', isManualWeight: false });
+                            sets.push({ id: Math.random(), weight: pastWeight, reps: '', rir: '', done: false, type: 'work', isManualWeight: false });
+                            sets.push({ id: Math.random(), weight: pastWeight, reps: '', rir: '', done: false, type: 'work', isManualWeight: false });
+
+                            return { id: item.id + '_' + Math.random(), refId: item.id, name: ref.name, muscle: ref.muscle, rest: item.rest || ref.defaultRest || 120, sets };
+                        })
+                    };
+                    setEditingLogId(null);
+                    setActiveSession(session);
+                    setModal(null);
+                };
+
+                const editWorkout = (log) => {
+                    setEditingLogId(log.id);
+                    setActiveSession(JSON.parse(JSON.stringify({
+                        ...log,
+                        exercises: log.exercises.map(ex => ({
+                            ...ex, sets: ex.sets.map(s => ({...s, rir: s.rir || '', type: s.type || 'work', done: true}))
+                        }))
+                    })));
+                };
+
+                const finishWorkout = () => {
+                    if (!activeSession) return;
+                    
+                    const validExs = (activeSession.exercises || []).map(ex => ({
+                        ...ex,
+                        sets: (ex.sets || []).filter(s => s.weight !== '' || s.reps !== '')
+                    })).filter(ex => ex.sets.length > 0);
+
+                    if (validExs.length > 0) {
+                        const finalLog = {
+                            id: editingLogId || Date.now(),
+                            routineName: activeSession.name,
+                            date: activeSession.date || new Date().toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'numeric' }),
+                            timestamp: activeSession.timestamp || Date.now(),
+                            durationMins: activeSession.durationMins || Math.floor((Date.now() - activeSession.startTime) / 60000),
+                            exercises: validExs
+                        };
+
+                        if (editingLogId) {
+                            setLogs(prev => prev.map(l => l.id === editingLogId ? finalLog : l));
+                        } else {
+                            setLogs(prev => [finalLog, ...(prev || [])]);
+                            runAIAnalysis(finalLog); 
+                        }
+                        
+                        setActiveSession(null); setEditingLogId(null); setRest(0); setModal(null); setView('history');
+                    } else {
+                        alert("ไม่พบข้อมูล (โปรดกรอกน้ำหนักหรือครั้งอย่างน้อย 1 เซต)");
+                        setModal(null);
+                    }
+                };
+
+                // --- 🌟 LOGIC: DEEP DIVE AI ANALYSIS (บังคับ JSON) 🌟 ---
+                const runAIAnalysis = async (currentLog) => {
+                    if (!apiKey) return alert("โปรดใส่ API Key ในหน้า Settings ก่อนครับ");
+                    setIsAnalyzing(true); setAnalysisResult(null);
+
+                    const prevLog = (logs || []).find(l => l.routineName === currentLog.routineName && l.id < currentLog.id);
+                    
+                    const sysPrompt = `คุณคือ 'Science Gym Bro' โค้ชวิทย์กีฬา
+                    ภารกิจ: วิเคราะห์การฝึกครั้งล่าสุดแบบ "เจาะลึกรายท่า (Exercise-by-Exercise)"
+                    หลักการ:
+                    1. ดูพัฒนาการเทียบกับรอบก่อน (น้ำหนัก/reps ขึ้นไหม)
+                    2. RIR Check: RIR>3 แปลว่าเบาไป, RIR=0 ประจำระวังล้า
+                    3. ตรวจหา Junk Volume
+
+                    คุณต้องตอบกลับเป็นรูปแบบ JSON เท่านั้น โครงสร้างดังนี้:
+                    {
+                      "score": <ตัวเลข 0-100 ประเมินความก้าวหน้าภาพรวม>,
+                      "short_recom": "<คำแนะนำสั้นๆ 1 ประโยค เช่น เยี่ยมมาก รอบหน้าเพิ่มน้ำหนัก RDL>",
+                      "analysis_text": "<บทวิเคราะห์จัดเต็ม ตาม Format ด้านล่าง>"
+                    }
+
+                    Format ของ analysis_text ที่ต้องการ:
+                    เยี่ยมมากครับพี่! ขอปรบมือให้ดังๆ เลยครับ บล็อกการฝึกวันนี้ดุดันมาก 💯
+
+                    🏆 The Masterpiece (จุดที่ทำได้โคตรดี):
+                    [อธิบายภาพรวม 1 ย่อหน้า]
+
+                    [จากนั้นอธิบายรายท่า เรียงข้อ 1, 2, 3...]
+                    1. [ชื่อท่า]: [อธิบายฟอร์ม/น้ำหนัก/Reps] 💡 คำแนะนำ...
+                    2. [ชื่อท่า]: ...
+
+                    🚨 Gym Bro Check-in (เช็คสภาพร่าง):
+                    1. [ถามความรู้สึกกล้ามเนื้อ]
+                    2. [ถามเรื่องการฟื้นตัว]
+
+                    ข้อมูลรอบก่อนหน้า: ${JSON.stringify(prevLog?.exercises || [])}
+                    ข้อมูลล่าสุด: ${JSON.stringify(currentLog.exercises)}`;
+
+                    try {
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                contents: [{ parts: [{ text: "โค้ช ตรวจการบ้านและประเมินรายท่าให้ที" }] }], 
+                                systemInstruction: { parts: [{ text: sysPrompt }] },
+                                generationConfig: { responseMimeType: "application/json" } // 👈 ล็อกให้ตอบ JSON เท่านั้น
+                            })
+                        });
+                        const data = await res.json();
+                        const resultJson = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+                        
+                        setAnalysisResult({ 
+                            score: resultJson.score || 80, 
+                            recommendation: resultJson.short_recom || "ทำได้ดีมาก ลุยต่อไป", 
+                            content: resultJson.analysis_text || "เกิดข้อผิดพลาดในการดึงข้อมูลวิเคราะห์"
+                        });
+                    } catch (error) { 
+                        console.error(error);
+                        alert("AI Error: ตรวจสอบ API Key หรือ อินเทอร์เน็ต");
+                    } finally { 
+                        setIsAnalyzing(false); 
+                    }
+                };
+
+                const handleWeightChange = (exIdx, sIdx, val) => {
+                    setActiveSession(prev => {
+                        const ns = {...prev};
+                        const targetSet = ns.exercises[exIdx].sets[sIdx];
+                        targetSet.weight = val;
+                        targetSet.isManualWeight = true;
+
+                        if (targetSet.type === 'work') {
+                            for (let i = sIdx + 1; i < ns.exercises[exIdx].sets.length; i++) {
+                                const nextSet = ns.exercises[exIdx].sets[i];
+                                if (nextSet.type === 'work' && (!nextSet.isManualWeight || nextSet.weight === '')) {
+                                    nextSet.weight = val;
+                                }
+                            }
+                        }
+                        return ns;
+                    });
+                };
+
+                const addSet = (exIdx, type) => {
+                    setActiveSession(prev => {
+                        const ns = {...prev};
+                        // หากมีน้ำหนักในเซตก่อนหน้า ให้ดึงมาใส่เบื้องต้น
+                        const workSets = ns.exercises[exIdx].sets.filter(s => s.type === 'work');
+                        const lastWork = workSets[workSets.length - 1];
+                        const suggestedWeight = type === 'work' && lastWork ? lastWork.weight : '';
+
+                        ns.exercises[exIdx].sets.push({ id: Math.random(), weight: suggestedWeight, reps: '', rir: '', done: false, type, percent: type === 'warmup' ? 50 : undefined, isManualWeight: false });
+                        return ns;
+                    });
+                };
+
+                const swapItem = (arr, idx, dir) => {
+                    if (idx + dir >= 0 && idx + dir < arr.length) {
+                        const temp = arr[idx]; arr[idx] = arr[idx + dir]; arr[idx + dir] = temp;
+                    }
+                };
+
+                // Calculate Volume for Chart
+                const chartData = useMemo(() => {
+                    return [...logs].reverse().map((log, i) => {
+                        let vol = 0;
+                        log.exercises.forEach(ex => {
+                            ex.sets.forEach(s => {
+                                if (s.type === 'work' && s.weight && s.reps) vol += parseFloat(s.weight) * parseInt(s.reps);
+                            });
+                        });
+                        return { id: log.id, date: log.date, vol };
+                    });
+                }, [logs]);
+
+
+                // --- RENDER ---
+                
+                // 1. ACTIVE WORKOUT
+                if (activeSession) {
                     return (
-                        <div className="p-8 bg-[#09090b] min-h-screen flex flex-col items-center justify-center text-center">
-                            <h2 className="text-red-500 font-black text-2xl mb-4">⚠️ SYSTEM CRASH</h2>
-                            <p className="text-zinc-400 text-xs mb-8">พบปัญหาข้อมูลขัดแย้ง กรุณากดปุ่มด้านล่างเพื่อเคลียร์ข้อมูลขยะ</p>
-                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg">RESET APP</button>
+                        <div className="fixed inset-0 bg-[#09090b] text-zinc-100 z-[200] flex flex-col pt-12 overflow-hidden animate-in">
+                            <div className="flex justify-between items-center mb-4 px-5 shrink-0">
+                                <div className="flex-1 overflow-hidden">
+                                    <h2 className="text-2xl font-black italic uppercase text-[#d4f04d] truncate leading-none">{activeSession.name}</h2>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                                        <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{editingLogId ? 'EDITING HISTORY' : 'RECORDING'}</span>
+                                    </div>
+                                </div>
+                                <button onClick={() => setModal('finish')} className="bg-[#d4f04d] text-black px-6 py-3 rounded-2xl font-black text-sm uppercase shadow-lg shadow-[#d4f04d]/20 active:scale-95 transition-transform z-[300]">DONE</button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto space-y-5 px-5 pb-40 no-scrollbar">
+                                {(activeSession.exercises || []).map((ex, exIdx) => (
+                                    <div key={ex.id} className="bg-[#18181b] p-4 rounded-[2.5rem] border border-zinc-800 shadow-xl relative">
+                                        {/* Header & Reorder */}
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex flex-col gap-1 shrink-0 mr-3">
+                                                <button onClick={() => setActiveSession(p=>{const ns={...p}; swapItem(ns.exercises, exIdx, -1); return ns;})} className="text-zinc-600 hover:text-white p-1 bg-zinc-900 rounded-lg"><Icons.ChevronUp size={14}/></button>
+                                                <button onClick={() => setActiveSession(p=>{const ns={...p}; swapItem(ns.exercises, exIdx, 1); return ns;})} className="text-zinc-600 hover:text-white p-1 bg-zinc-900 rounded-lg"><Icons.ChevronDown size={14}/></button>
+                                            </div>
+                                            <div className="flex-1 pr-2">
+                                                <h3 className="text-sm font-black uppercase text-zinc-100 leading-tight italic">{ex.name}</h3>
+                                                <div className="flex items-center gap-2 mt-2">
+                                                    <span className="text-[8px] bg-zinc-900 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-800 font-black uppercase tracking-widest">{ex.muscle}</span>
+                                                    <span className="text-[8px] text-blue-400 font-black uppercase tracking-widest bg-blue-900/20 px-2 py-1 rounded-lg flex items-center gap-1"><Icons.Clock size={10}/> Rest: {ex.rest}s</span>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => { setActiveSession(prev => { const ns = {...prev}; ns.exercises.splice(exIdx, 1); return ns; }); }} className="text-zinc-800 p-1"><Icons.X size={18}/></button>
+                                        </div>
+
+                                        {/* Table Grid Header */}
+                                        <div className="grid grid-cols-[40px_1fr_1fr_40px_35px_30px] gap-1 text-[8px] font-black text-zinc-600 uppercase tracking-widest px-1 mb-1 text-center items-center">
+                                            <div className="text-left pl-1">SET</div><div>KG</div><div>REPS</div><div>RIR</div><div></div><div></div>
+                                        </div>
+
+                                        {/* Sets List */}
+                                        <div className="space-y-2">
+                                            {(ex.sets || []).map((set, sIdx) => {
+                                                const workSets = ex.sets.filter(s => s.type === 'work');
+                                                const isLastWorkSet = set.type === 'work' && set === workSets[workSets.length - 1];
+                                                
+                                                return (
+                                                    <div key={set.id} className={`grid grid-cols-[40px_1fr_1fr_40px_35px_30px] gap-1 items-center p-1 rounded-2xl transition-all duration-300 ${set.done ? 'bg-black opacity-60 grayscale' : 'bg-transparent'}`}>
+                                                        {/* Col 1: Swap Set & Type */}
+                                                        <div className="flex items-center gap-0.5">
+                                                            <div className="flex flex-col gap-0.5 shrink-0">
+                                                                <button onClick={()=>setActiveSession(p=>{const ns={...p}; swapItem(ns.exercises[exIdx].sets, sIdx, -1); return ns;})} className="text-zinc-700"><Icons.ChevronUp size={10}/></button>
+                                                                <button onClick={()=>setActiveSession(p=>{const ns={...p}; swapItem(ns.exercises[exIdx].sets, sIdx, 1); return ns;})} className="text-zinc-700"><Icons.ChevronDown size={10}/></button>
+                                                            </div>
+                                                            <div className={`w-6 text-[9px] font-black italic text-center ${set.type === 'warmup' ? 'text-blue-500' : 'text-zinc-400'}`}>
+                                                                {set.type === 'warmup' ? `W${sIdx + 1}` : (ex.sets.filter((_, i) => i < sIdx && ex.sets[i].type === 'work').length + 1)}
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {/* Col 2: Weight */}
+                                                        <input 
+                                                            type="number" placeholder="kg"
+                                                            value={set.weight}
+                                                            onChange={e => handleWeightChange(exIdx, sIdx, e.target.value)} 
+                                                            className={`w-full h-9 rounded-lg text-center font-black text-xs outline-none border transition-all ${set.done ? 'done-input' : (set.type === 'warmup' ? 'bg-black border-blue-900/30 text-blue-400 focus:border-blue-500' : 'bg-black border-zinc-800 focus:border-[#d4f04d] text-white')}`} 
+                                                        />
+                                                        
+                                                        {/* Col 3: Reps */}
+                                                        <input 
+                                                            type="number" placeholder="reps" 
+                                                            value={set.reps}
+                                                            onChange={e => { setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets[sIdx].reps = e.target.value; return ns; }); }} 
+                                                            className={`w-full h-9 rounded-lg text-center font-black text-xs outline-none border transition-all ${set.done ? 'done-input' : 'bg-black border-zinc-800 focus:border-[#d4f04d] text-white'}`} 
+                                                        />
+                                                        
+                                                        {/* Col 4: RIR Dropdown */}
+                                                        <div className="w-full">
+                                                            {isLastWorkSet ? (
+                                                                <select value={set.rir || ''} onChange={e => { setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets[sIdx].rir = e.target.value; return ns; }); }} className={`w-full h-9 rounded-lg font-black text-[10px] outline-none border transition-all ${set.done ? 'done-input text-zinc-600' : 'bg-zinc-900 border-zinc-700 text-[#d4f04d] focus:border-[#d4f04d]'}`}>
+                                                                    <option value="">-</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                                                                </select>
+                                                            ) : (
+                                                                <div className="text-center text-zinc-800 text-[10px] font-black w-full h-9 flex items-center justify-center">•</div>
+                                                            )}
+                                                        </div>
+                                                        
+                                                        {/* Col 5: Check/Done (Opt-in timer) */}
+                                                        <button 
+                                                            onClick={() => { setActiveSession(prev => { const ns = {...prev}; const isNowDone = !ns.exercises[exIdx].sets[sIdx].done; ns.exercises[exIdx].sets[sIdx].done = isNowDone; if (isNowDone && rest === 0 && set.type === 'work' && !editingLogId) setRest(ex.rest); return ns; }); }} 
+                                                            className={`w-full h-9 rounded-lg flex items-center justify-center transition-all ${set.done ? 'bg-[#d4f04d] text-black shadow-lg' : 'bg-zinc-900 text-zinc-600 border border-zinc-800 active:scale-90'}`}
+                                                        >
+                                                            <Icons.Check size={16} strokeWidth={4}/>
+                                                        </button>
+
+                                                        {/* Col 6: Delete Set 🗑️ */}
+                                                        <button 
+                                                            onClick={() => { setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets.splice(sIdx, 1); return ns; }); }} 
+                                                            className="w-full h-9 flex items-center justify-center bg-zinc-900/50 text-zinc-600 hover:text-red-500 rounded-lg active:scale-90 transition-colors"
+                                                        >
+                                                            <Icons.Trash size={12}/>
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                            
+                                            <div className="flex gap-2 pt-2">
+                                                <button onClick={() => addSet(exIdx, 'warmup')} className="flex-1 py-2.5 border border-dashed border-blue-900/50 rounded-xl text-[9px] font-black uppercase text-blue-500 tracking-widest active:scale-95 transition-transform">+ Warm-up</button>
+                                                <button onClick={() => addSet(exIdx, 'work')} className="flex-[1.5] py-2.5 border border-dashed border-zinc-700 rounded-xl text-[9px] font-black uppercase text-zinc-400 tracking-widest active:scale-95 transition-transform">+ Work Set</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                                <button onClick={() => setPicker({ targetId: 'live', selectedIds: [] })} className="w-full py-8 border-2 border-dashed border-zinc-800 rounded-[3rem] font-black uppercase text-zinc-600 tracking-widest bg-zinc-900/10 active:scale-95 flex items-center justify-center gap-3">
+                                    <Icons.Plus size={20}/> Add Movement
+                                </button>
+                            </div>
+
+                            {/* Rest Timer */}
+                            {rest > 0 && (
+                                <div className="absolute bottom-10 left-5 right-5 bg-blue-600 p-6 rounded-[2.5rem] flex justify-between items-center shadow-2xl z-[300] animate-in"><div className="flex items-center gap-4 text-white"><Icons.Clock size={28} /><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60 leading-none mb-1">Resting</p><p className="text-4xl font-black font-mono leading-none">{Math.floor(rest/60)}:{(rest%60).toString().padStart(2, '0')}</p></div></div><button onClick={() => setRest(0)} className="bg-white text-blue-600 px-6 py-3 rounded-xl font-black text-xs uppercase shadow-lg active:scale-95">Skip</button></div>
+                            )}
+                            
+                            {modal === 'finish' && (
+                                <div className="fixed inset-0 bg-black/95 z-[500] flex items-center justify-center p-8 backdrop-blur-md animate-in">
+                                    <div className="bg-[#18181b] p-10 rounded-[3.5rem] w-full max-w-sm text-center border border-zinc-800 shadow-2xl">
+                                        <h3 className="text-2xl font-black text-white uppercase italic mb-8 tracking-tighter">Save Session?</h3>
+                                        <button onClick={finishWorkout} className="w-full bg-[#d4f04d] text-black py-5 rounded-[2.5rem] font-black uppercase text-xs shadow-xl active:scale-95 mb-4">SAVE DATA</button>
+                                        <button onClick={() => setModal(null)} className="text-zinc-700 uppercase font-black text-[9px] tracking-widest py-2">Keep Lifting</button>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {picker && picker.targetId === 'live' && (
+                                <div className="fixed inset-0 bg-[#09090b] z-[400] flex flex-col p-8 pt-16 overflow-hidden animate-in">
+                                    <div className="flex justify-between items-center mb-10 shrink-0"><h2 className="text-3xl font-black italic uppercase text-white tracking-tighter leading-none">Select Moves</h2><div className="flex gap-3"><button onClick={() => setPicker(null)} className="text-zinc-700 font-black uppercase text-[10px]">Cancel</button><button onClick={() => { const nx = picker.selectedIds.map(id => { const r = allDB.find(e => e.id === id); return { id: Math.random(), refId: id, name: r.name, muscle: r.muscle, rest: 120, sets: Array(3).fill(null).map(() => ({id: Math.random(), weight: '', reps: '', rir: '', done: false, type: 'work', isManualWeight: false})) }; }); setActiveSession(p => ({...p, exercises: [...(p.exercises||[]), ...nx]})); setPicker(null); }} disabled={picker.selectedIds.length === 0} className="bg-[#d4f04d] text-black font-black uppercase text-[10px] px-6 py-3 rounded-2xl disabled:opacity-30 active:scale-95 shadow-lg">Add ({picker.selectedIds.length})</button></div></div>
+                                    <div className="flex-1 overflow-y-auto space-y-4 pb-32 no-scrollbar">
+                                        {allDB.map(ex => {
+                                            const isS = picker.selectedIds.includes(ex.id);
+                                            return (<div key={ex.id} onClick={() => setPicker(p => ({...p, selectedIds: isS ? p.selectedIds.filter(i => i !== ex.id) : [...p.selectedIds, ex.id]}))} className={`bg-[#18181b] p-6 rounded-[2.5rem] border flex justify-between items-center transition-all ${isS ? 'border-[#d4f04d] bg-[#d4f04d]/5 scale-[0.98]' : 'border-zinc-800'}`}><div className="flex-1 pr-4"><p className={`font-black text-xl uppercase italic leading-none ${isS ? 'text-[#d4f04d]' : 'text-white'}`}>{ex.name}</p><p className="text-[8px] text-zinc-600 font-black uppercase mt-2 tracking-widest">{ex.muscle}</p></div><div className={`w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all ${isS ? 'bg-[#d4f04d] border-transparent text-black' : 'border-zinc-800 text-zinc-800'}`}>{isS ? <Icons.Check size={18} strokeWidth={4}/> : <Icons.Plus size={18}/>}</div></div>);
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     );
                 }
-                return this.props.children; 
-            }
-        }
 
-        // --- 4. MAIN APP ENGINE ---
-        function App() {
-            const [view, setView] = useState('home');
-            const [modal, setModal] = useState(null);
-
-            // Safe Load Functions
-            const safeGetJSON = (key, fallback) => {
-                try { const val = window.localStorage.getItem(key); return val ? JSON.parse(val) : fallback; } 
-                catch (e) { return fallback; }
-            };
-
-            // States (ใช้คีย์ใหม่ v21 ป้องกันข้อมูลเน่า)
-            const [logs, setLogs] = useState(() => safeGetJSON('fg_v21_logs', []));
-            const [routines, setRoutines] = useState(() => safeGetJSON('fg_v21_routines', []));
-            const [customEx, setCustomEx] = useState(() => safeGetJSON('fg_v21_custom', []));
-            const [favorites, setFavorites] = useState(() => safeGetJSON('fg_v21_favs', []));
-            const [collapsed, setCollapsed] = useState(() => safeGetJSON('fg_v21_coll', []));
-            const [apiKey, setApiKey] = useState(() => window.localStorage.getItem('fg_v21_key') || '');
-            const [isLocked, setIsLocked] = useState(() => window.localStorage.getItem('fg_v21_lock') === 'true');
-
-            // Session States
-            const [activeSession, setActiveSession] = useState(null);
-            const [rest, setRest] = useState(0);
-            
-            // AI States
-            const [isAnalyzing, setIsAnalyzing] = useState(false);
-            const [analysisResult, setAnalysisResult] = useState(null);
-
-            // UI States
-            const [picker, setPicker] = useState(null);
-            const [search, setSearch] = useState('');
-            const [cat, setCat] = useState('All');
-            const [formName, setFormName] = useState('');
-
-            const allDB = useMemo(() => [...MASTER_DB, ...(customEx || [])], [customEx]);
-
-            // Save Effects & Hide Initial Loader
-            useEffect(() => {
-                const loader = document.getElementById('loading');
-                if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.style.display = 'none', 300); }
-
-                const safeSet = (k, v) => { try { window.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch(e){} };
-                safeSet('fg_v21_logs', logs);
-                safeSet('fg_v21_routines', routines);
-                safeSet('fg_v21_custom', customEx);
-                safeSet('fg_v21_favs', favorites);
-                safeSet('fg_v21_coll', collapsed);
-                safeSet('fg_v21_key', apiKey);
-                safeSet('fg_v21_lock', isLocked ? 'true' : 'false');
-            }, [logs, routines, customEx, favorites, collapsed, apiKey, isLocked]);
-
-            useEffect(() => {
-                if (rest <= 0) return;
-                const timerId = setInterval(() => setRest(r => r - 1), 1000);
-                return () => clearInterval(timerId);
-            }, [rest]);
-
-            // --- Logic Functions ---
-            const startWorkout = (routineObj = null) => {
-                const warmedGroups = new Set();
-                const safeRoutine = routineObj || { name: 'FREESTYLE', exercises: [] };
-                
-                const session = {
-                    id: Date.now(), name: safeRoutine.name, startTime: Date.now(),
-                    exercises: (safeRoutine.exercises || []).map(item => {
-                        const ref = allDB.find(e => e.id === item.id) || { name: 'Unknown Move', muscle: 'Other', defaultRest: 120 };
-                        const needsWarmup = !warmedGroups.has(ref.muscle);
-                        if (needsWarmup) warmedGroups.add(ref.muscle);
-
-                        const sets = [];
-                        if (needsWarmup) {
-                            sets.push({ id: Math.random(), weight: '', reps: '15', rir: '', done: false, type: 'warmup', percent: 30 });
-                            sets.push({ id: Math.random(), weight: '', reps: '8', rir: '', done: false, type: 'warmup', percent: 60 });
-                        }
-                        sets.push({ id: Math.random(), weight: '', reps: '', rir: '', done: false, type: 'work' });
-                        sets.push({ id: Math.random(), weight: '', reps: '', rir: '', done: false, type: 'work' });
-                        sets.push({ id: Math.random(), weight: '', reps: '', rir: '', done: false, type: 'work' });
-
-                        return { id: item.id + '_' + Math.random(), refId: item.id, name: ref.name, muscle: ref.muscle, rest: item.rest || ref.defaultRest || 120, sets };
-                    })
-                };
-                setActiveSession(session);
-                setModal(null);
-            };
-
-            const finishWorkout = () => {
-                if (!activeSession) return;
-                const validExs = (activeSession.exercises || []).map(ex => ({
-                    name: ex.name, muscle: ex.muscle, sets: (ex.sets || []).filter(s => s.done && (s.weight !== '' || s.reps !== ''))
-                })).filter(ex => ex.sets.length > 0);
-
-                if (validExs.length > 0) {
-                    const newLog = {
-                        id: Date.now(), routineName: activeSession.name, date: new Date().toLocaleDateString('th-TH'),
-                        timestamp: Date.now(), durationMins: Math.floor((Date.now() - activeSession.startTime) / 60000), exercises: validExs
-                    };
-                    setLogs(prev => [newLog, ...(prev || [])]);
-                    runAIAnalysis(newLog);
-                }
-                
-                setActiveSession(null); setRest(0); setModal(null); setView('history');
-            };
-
-            const runAIAnalysis = async (currentLog) => {
-                if (!apiKey) return;
-                setIsAnalyzing(true); setAnalysisResult(null);
-
-                const prevLog = (logs || []).find(l => l.routineName === currentLog.routineName && l.id < currentLog.id);
-                const sysPrompt = `คุณคือ 'Science Gym Bro' วิเคราะห์ Progressive Overload
-                บรรทัด 1: SCORE: [0-100]
-                บรรทัด 2: RECOM: [แนะนำสั้นๆ]
-                บรรทัดต่อมา: อธิบายเชิงวิทยาศาสตร์ (ภาษาไทย)
-                ข้อมูลก่อนหน้า: ${JSON.stringify(prevLog?.exercises || [])}
-                ข้อมูลล่าสุด: ${JSON.stringify(currentLog.exercises)}`;
-
-                try {
-                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: "Analyze my progress bro" }] }], systemInstruction: { parts: [{ text: sysPrompt }] } })
-                    });
-                    const data = await res.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                    const score = parseInt(text.match(/SCORE:\s*(\d+)/)?.[1] || "0");
-                    const recom = text.match(/RECOM:\s*(.*)/)?.[1] || "ทำได้ดีมาก ลุยต่อไป";
-                    const cleanText = text.replace(/SCORE:.*\n?/, "").replace(/RECOM:.*\n?/, "").trim();
-                    setAnalysisResult({ score, recommendation: recom, content: cleanText });
-                } catch (error) { console.error(error); } finally { setIsAnalyzing(false); }
-            };
-
-            // --- RENDER ---
-            
-            // 1. ACTIVE WORKOUT
-            if (activeSession) {
+                // 2. MAIN NAV VIEWS
                 return (
-                    <div className="fixed inset-0 bg-[#09090b] text-zinc-100 z-[100] flex flex-col p-5 pt-12 overflow-hidden">
-                        <div className="flex justify-between items-center mb-6 shrink-0">
-                            <div className="flex-1 overflow-hidden">
-                                <h2 className="text-2xl font-black italic uppercase text-[#d4f04d] truncate leading-none">{activeSession.name}</h2>
-                                <div className="flex items-center gap-2 mt-2"><div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div><span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Recording</span></div>
-                            </div>
-                            <button onClick={() => setModal('finish')} className="bg-[#d4f04d] text-black px-6 py-3 rounded-2xl font-black text-sm uppercase shadow-lg shadow-[#d4f04d]/20 active:scale-95 transition-all">DONE</button>
-                        </div>
+                    <div className="max-w-md mx-auto min-h-screen flex flex-col relative overflow-x-hidden pb-32">
+                        <header className="p-6 sticky top-0 bg-[#09090b]/95 backdrop-blur-md z-40 border-b border-zinc-900 flex justify-between items-center">
+                            <div><h1 className="text-2xl font-black italic text-[#d4f04d] tracking-tighter">FITGENIUS</h1><p className="text-[7px] font-bold text-zinc-600 uppercase tracking-widest mt-1">Science Core v34</p></div>
+                        </header>
 
-                        <div className="flex-1 overflow-y-auto space-y-6 pb-40 no-scrollbar">
-                            {(activeSession.exercises || []).map((ex, exIdx) => (
-                                <div key={ex.id} className="bg-[#18181b] p-5 rounded-[2.5rem] border border-zinc-800 shadow-xl">
-                                    <div className="flex justify-between items-start mb-5">
-                                        <div className="flex-1 pr-4">
-                                            <h3 className="text-md font-black uppercase text-zinc-100 leading-tight italic">{ex.name}</h3>
-                                            <div className="flex items-center gap-2 mt-2">
-                                                <span className="text-[8px] bg-zinc-900 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-800 font-black uppercase tracking-widest">{ex.muscle}</span>
-                                                <span className="text-[8px] text-blue-400 font-black uppercase tracking-widest bg-blue-900/20 px-2 py-1 rounded-lg flex items-center gap-1"><Clock size={10}/> Rest: {ex.rest}s</span>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => { setActiveSession(prev => { const ns = {...prev}; ns.exercises.splice(exIdx, 1); return ns; }); }} className="text-zinc-800 p-1"><X size={20}/></button>
-                                    </div>
-
-                                    <div className="flex text-[8px] font-black text-zinc-600 uppercase tracking-widest px-1 mb-2"><div className="w-8 text-left">SET</div><div className="flex-1 text-center">KG</div><div className="flex-1 text-center">REPS</div><div className="w-10 text-center">RIR</div><div className="w-10 text-center"></div></div>
-
-                                    <div className="space-y-3">
-                                        {(ex.sets || []).map((set, sIdx) => {
-                                            const isLastSet = sIdx === ex.sets.length - 1;
-                                            const firstWorkSet = ex.sets.find(s => s.type === 'work');
-                                            const workWeight = firstWorkSet ? (parseFloat(firstWorkSet.weight) || 0) : 0;
-                                            const displayWarmupWeight = set.type === 'warmup' && workWeight ? Math.round(workWeight * (set.percent / 100)) : '';
-
-                                            return (
-                                                <div key={set.id} className={`flex items-center gap-2 transition-all ${set.done ? 'opacity-30 scale-[0.98]' : ''}`}>
-                                                    <div className={`w-8 text-[11px] font-black italic text-left ${set.type === 'warmup' ? 'text-blue-500' : 'text-zinc-600'}`}>{set.type === 'warmup' ? `W${sIdx + 1}` : (ex.sets.filter((_, i) => i < sIdx && ex.sets[i].type === 'work').length + 1)}</div>
-                                                    <input type="number" placeholder={set.type === 'warmup' ? (displayWarmupWeight || "-") : "-"} value={set.type === 'warmup' ? '' : set.weight} disabled={set.type === 'warmup'} onChange={e => { const val = e.target.value; setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets[sIdx].weight = val; return ns; }); }} className={`flex-1 bg-black h-12 rounded-xl text-center font-black text-sm outline-none border ${set.type === 'warmup' ? 'border-blue-900/20 text-blue-500/50' : 'border-zinc-900 focus:border-[#d4f04d] text-white'}`} />
-                                                    <input type="number" placeholder="-" value={set.reps} onChange={e => { const val = e.target.value; setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets[sIdx].reps = val; return ns; }); }} className="flex-1 bg-black h-12 rounded-xl text-center font-black text-sm outline-none border border-zinc-900 focus:border-[#d4f04d] text-white" />
-                                                    <div className="w-10">{isLastSet && set.type === 'work' ? (<input type="number" placeholder="RIR" value={set.rir || ''} onChange={e => { const val = e.target.value; setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets[sIdx].rir = val; return ns; }); }} className="w-full bg-zinc-900 h-12 rounded-xl text-center font-black text-[9px] border border-zinc-800 text-[#d4f04d] outline-none" />) : (<div className="text-center text-zinc-900 text-[10px] font-black">•</div>)}</div>
-                                                    <button onClick={() => { setActiveSession(prev => { const ns = {...prev}; const isNowDone = !ns.exercises[exIdx].sets[sIdx].done; ns.exercises[exIdx].sets[sIdx].done = isNowDone; if (isNowDone && rest === 0 && set.type === 'work') setRest(ex.rest); return ns; }); }} className={`w-10 h-12 rounded-xl flex items-center justify-center transition-all ${set.done ? 'bg-[#d4f04d] text-black shadow-lg shadow-[#d4f04d]/20' : 'bg-zinc-900 text-zinc-700 border border-zinc-800'}`}><Check size={18} strokeWidth={4}/></button>
-                                                </div>
-                                            );
-                                        })}
-                                        <button onClick={() => { setActiveSession(prev => { const ns = {...prev}; ns.exercises[exIdx].sets.push({ id: Math.random(), weight: '', reps: '', rir: '', done: false, type: 'work' }); return ns; }); }} className="w-full py-3 border border-dashed border-zinc-800 rounded-xl text-[9px] font-black uppercase text-zinc-700 tracking-widest active:scale-95 transition-transform">+ Add Working Set</button>
+                        <main className="p-5 flex-1">
+                            {view === 'home' && (
+                                <div className="space-y-8 animate-in">
+                                    <div className="bg-[#18181b] p-10 rounded-[3.5rem] border border-zinc-800 shadow-2xl relative overflow-hidden flex justify-between items-end"><div className="relative z-10"><p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-2 leading-none">Total Sessions</p><h2 className="text-7xl font-black italic text-white tracking-tighter leading-none">{logs.length}</h2></div><Icons.Activity className="absolute -right-4 -bottom-4 text-[#d4f04d]/5" size={150}/></div>
+                                    
+                                    <div className="space-y-4 pt-4 border-t border-zinc-900">
+                                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-2 flex items-center gap-2"><Icons.Star size={14} className="text-[#d4f04d]"/> Favorite Programs</h3>
+                                        {(favorites || []).length === 0 ? (<div className="py-12 text-center border-2 border-dashed border-zinc-900 rounded-[2.5rem]"><p className="text-zinc-700 font-black uppercase text-[10px]">ไม่มีโปรแกรมโปรด</p><p className="text-zinc-600 text-[8px] font-bold mt-2">ไปที่ Program Lab แล้วกด ⭐️ ให้โปรแกรม</p></div>) : (<div className="grid grid-cols-1 gap-3">
+                                            {favorites.map(fid => {
+                                                const r = (routines || []).find(x => x.id === fid); if (!r) return null;
+                                                return (<button key={fid} onClick={() => startWorkout(r)} className="bg-[#d4f04d] text-black p-6 rounded-[2.5rem] flex justify-between items-center active:scale-95 transition-transform shadow-xl shadow-[#d4f04d]/10 text-left"><div><p className="font-black italic uppercase text-xl leading-none tracking-tighter">{r.name}</p><p className="text-[9px] font-black uppercase mt-2 opacity-60 tracking-widest">{r.exercises.length} Movements</p></div><Icons.TrendingUp size={28} /></button>);
+                                            })}
+                                        </div>)}
                                     </div>
                                 </div>
-                            ))}
-                            <button onClick={() => setPicker({ targetId: 'live', selectedIds: [] })} className="w-full py-8 border-2 border-dashed border-zinc-800 rounded-[3rem] font-black uppercase text-zinc-600 tracking-widest bg-zinc-900/10 active:scale-95 transition-all flex items-center justify-center gap-3"><Plus size={24}/> Add Movement</button>
-                        </div>
+                            )}
+                            
+                            {view === 'stats' && (() => {
+                                const vData = chartData;
+                                const maxV = Math.max(...vData.map(d=>d.vol), 1);
+                                const totalV = vData.reduce((acc, d)=>acc+d.vol, 0);
+                                const avgV = vData.length ? Math.round(totalV / vData.length) : 0;
+                                
+                                return (
+                                    <div className="space-y-6 animate-in">
+                                        <div className="flex justify-between items-center px-2"><h2 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Volume Trends</h2></div>
+                                        <div className="bg-[#18181b] p-6 rounded-[2.5rem] border border-zinc-800 shadow-xl">
+                                            <div className="h-48 flex items-end justify-between gap-1 border-b border-zinc-800 pb-2 mb-2 relative">
+                                                <div className="absolute w-full border-t border-blue-500/30 border-dashed z-0" style={{bottom: `${(avgV/maxV)*100}%`}}></div>
+                                                {vData.length === 0 ? <p className="text-center w-full text-zinc-700 font-black text-[10px] uppercase mt-20">No Data</p> : vData.map(d => (
+                                                    <div key={d.id} className="w-full bg-[#d4f04d] rounded-t-sm opacity-90 z-10 hover:opacity-100 transition-opacity" style={{height: `${(d.vol/maxV)*100}%`}}></div>
+                                                ))}
+                                            </div>
+                                            <div className="flex justify-between text-[8px] text-zinc-600 font-bold px-1 uppercase tracking-widest">
+                                                <span>Oldest</span><span>Recent</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="bg-[#18181b] p-5 rounded-3xl border border-zinc-800"><p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total Volume</p><h4 className="text-xl font-black text-white">{totalV.toLocaleString()} <span className="text-[10px] text-zinc-500">kg</span></h4></div>
+                                            <div className="bg-[#18181b] p-5 rounded-3xl border border-zinc-800"><p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Max Session</p><h4 className="text-xl font-black text-[#d4f04d]">{maxV.toLocaleString()} <span className="text-[10px] text-zinc-500">kg</span></h4></div>
+                                            <div className="bg-[#18181b] p-5 rounded-3xl border border-zinc-800"><p className="text-[8px] font-black text-blue-500 uppercase tracking-widest mb-1">Average</p><h4 className="text-xl font-black text-white">{avgV.toLocaleString()} <span className="text-[10px] text-zinc-500">kg</span></h4></div>
+                                            <div className="bg-[#18181b] p-5 rounded-3xl border border-zinc-800"><p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Workouts</p><h4 className="text-xl font-black text-white">{vData.length}</h4></div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
-                        {rest > 0 && (
-                            <div className="absolute bottom-10 left-5 right-5 bg-blue-600 p-6 rounded-[2.5rem] flex justify-between items-center shadow-2xl z-[120] animate-in"><div className="flex items-center gap-4 text-white"><Clock size={28} /><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60 leading-none mb-1">Resting</p><p className="text-4xl font-black font-mono leading-none">{Math.floor(rest/60)}:{(rest%60).toString().padStart(2, '0')}</p></div></div><button onClick={() => setRest(0)} className="bg-white text-blue-600 px-6 py-3 rounded-xl font-black text-xs uppercase shadow-lg active:scale-95">Skip</button></div>
+                            {view === 'train' && (
+                                <div className="space-y-6 animate-in">
+                                    <div className="flex justify-between items-center px-2"><h2 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Program Lab</h2><button onClick={() => setModal('create')} className="bg-[#d4f04d]/10 text-[#d4f04d] px-5 py-2.5 rounded-xl text-[10px] font-black border border-[#d4f04d]/20 uppercase active:scale-95">+ New</button></div>
+                                    {(routines || []).map(r => {
+                                        const isC = (collapsed || []).includes(r.id); const isF = (favorites || []).includes(r.id);
+                                        return (
+                                            <div key={r.id} className="bg-[#18181b] rounded-[3rem] border border-zinc-800 shadow-xl overflow-hidden mb-4">
+                                                <div className="p-6 pb-4 flex justify-between items-center bg-zinc-900/30 cursor-pointer" onClick={() => setCollapsed(prev => isC ? prev.filter(x => x !== r.id) : [...(prev||[]), r.id])}>
+                                                    <div className="flex items-center gap-4"><button onClick={(e) => { e.stopPropagation(); setFavorites(prev => isF ? prev.filter(x => x !== r.id) : [...(prev||[]), r.id]); }} className={`p-2 rounded-xl transition-colors ${isF ? 'text-yellow-400' : 'text-zinc-700 hover:text-zinc-400'}`}><Icons.Star size={20} fill={isF ? "currentColor" : "none"}/></button><div><h3 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">{r.name}</h3><p className="text-[9px] text-zinc-500 font-bold uppercase mt-2 tracking-widest">{r.exercises.length} Moves</p></div></div>
+                                                    <div className="flex items-center gap-2"><button onClick={(e) => { e.stopPropagation(); if (confirm("ลบโปรแกรมนี้ใช่ไหม?")) setRoutines(prev => prev.filter(x => x.id !== r.id)); }} className="text-zinc-800 hover:text-red-500 p-2"><Icons.Trash size={16}/></button><div className="text-zinc-600">{isC ? <Icons.ChevronDown size={20}/> : <Icons.ChevronUp size={20}/>}</div></div>
+                                                </div>
+                                                {!isC && (
+                                                    <div className="p-6 pt-2 space-y-4 animate-in">
+                                                        <div className="space-y-2">{(r.exercises || []).map((item, idx) => {
+                                                            const ex = allDB.find(e => e.id === item.id) || { name: 'Unknown' };
+                                                            return (<div key={idx} className="bg-black p-4 rounded-2xl border border-zinc-800/50 flex items-center gap-4"><div className="flex flex-col gap-1 shrink-0"><button onClick={() => { const nx = [...r.exercises]; if (idx > 0) { [nx[idx], nx[idx-1]] = [nx[idx-1], nx[idx]]; setRoutines(p => p.map(rt => rt.id === r.id ? {...rt, exercises: nx} : rt)); } }} className="text-zinc-700 hover:text-white"><Icons.ArrowUp size={16}/></button><button onClick={() => { const nx = [...r.exercises]; if (idx < nx.length - 1) { [nx[idx], nx[idx+1]] = [nx[idx+1], nx[idx]]; setRoutines(p => p.map(rt => rt.id === r.id ? {...rt, exercises: nx} : rt)); } }} className="text-zinc-700 hover:text-white"><Icons.ArrowDown size={16}/></button></div><div className="flex-1"><p className="text-xs font-black text-zinc-300 uppercase italic tracking-tighter leading-none">{ex.name}</p><div className="flex items-center gap-2 mt-2 text-[8px] text-zinc-600 font-black uppercase tracking-widest">REST: <input type="number" value={item.rest} onChange={e => { const val = parseInt(e.target.value) || 0; setRoutines(p => p.map(rt => rt.id === r.id ? { ...rt, exercises: rt.exercises.map((ei, i) => i === idx ? { ...ei, rest: val } : ei) } : rt)); }} className="bg-zinc-900 border border-zinc-800 text-[10px] text-blue-400 font-black w-12 text-center rounded px-1 outline-none" />s</div></div><button onClick={() => { const nx = [...r.exercises]; nx.splice(idx, 1); setRoutines(p => p.map(rt => rt.id === r.id ? {...rt, exercises: nx} : rt)); }} className="text-zinc-800 hover:text-red-500"><Icons.X size={18}/></button></div>);
+                                                        })}</div>
+                                                        <div className="flex gap-3 pt-2"><button onClick={() => setPicker({ targetId: r.id, selectedIds: [] })} className="flex-1 py-5 rounded-[1.8rem] bg-zinc-900 border border-zinc-800 font-black uppercase text-[10px] text-zinc-500 tracking-widest active:scale-95 transition-transform">+ Add Move</button><button onClick={() => startWorkout(r)} className="flex-[1.8] py-5 rounded-[1.8rem] bg-[#d4f04d] text-black font-black uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-transform">Start Routine</button></div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {/* 📝 HISTORY (บรรทัดต่อบรรทัด ตามคำขอ) */}
+                            {view === 'history' && (
+                                <div className="space-y-6 animate-in">
+                                    <h2 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-2">History Records</h2>
+                                    {(logs || []).length === 0 ? <p className="text-center py-20 text-zinc-700 font-black uppercase text-xs border-2 border-dashed border-zinc-900 rounded-[3rem]">ยังไม่มีประวัติการฝึก</p> : logs.map(log => (
+                                        <div key={log.id} className="bg-[#18181b] p-6 rounded-[2.5rem] border border-zinc-800 shadow-xl mb-4">
+                                            <div className="flex justify-between items-start mb-5 border-b border-zinc-800/50 pb-4">
+                                                <div><h3 className="text-xl font-black text-[#d4f04d] italic uppercase tracking-tighter leading-none">{log.routineName}</h3><p className="text-[9px] text-zinc-500 font-black uppercase mt-2 tracking-widest">{log.date} • {log.durationMins} MINS</p></div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <button onClick={() => editWorkout(log)} className="bg-zinc-800 text-zinc-400 p-2.5 rounded-xl border border-zinc-700 active:scale-95 transition-all"><Icons.Edit size={14}/></button>
+                                                    <button onClick={() => runAIAnalysis(log)} disabled={isAnalyzing} className="bg-blue-600/10 text-blue-400 p-2.5 rounded-xl border border-blue-600/20 active:scale-95 transition-all"><Icons.Brain size={14}/></button>
+                                                    <button onClick={() => setLogs(p => p.filter(x => x.id !== log.id))} className="text-zinc-800 hover:text-red-500 p-2.5 bg-zinc-900 rounded-xl"><Icons.Trash size={14}/></button>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* โชว์ข้อมูลตารางรายบรรทัด (Line-by-Line) */}
+                                            <div className="space-y-4">
+                                                {(log.exercises || []).map((ex, i) => (
+                                                    <div key={i} className="border-l-2 border-[#d4f04d] pl-3">
+                                                        <p className="text-[11px] font-black text-white uppercase tracking-tight mb-2">{ex.name}</p>
+                                                        <div className="space-y-1">
+                                                            {(ex.sets || []).map((s, si) => {
+                                                                const workSetNum = ex.sets.filter((x, idx) => idx <= si && x.type === 'work').length;
+                                                                return (
+                                                                    <div key={si} className="flex justify-between text-[10px] font-medium text-zinc-400 bg-black/30 p-1.5 px-3 rounded-lg">
+                                                                        <span className={s.type === 'warmup' ? 'text-blue-500/80 italic' : 'text-zinc-500'}>
+                                                                            {s.type === 'warmup' ? 'Warm-up' : `Set ${workSetNum}`}
+                                                                        </span>
+                                                                        <span className="font-mono">
+                                                                            <strong className="text-zinc-200">{s.weight || 0}</strong> kg × <strong className="text-zinc-200">{s.reps || 0}</strong>
+                                                                            {s.rir && s.type === 'work' ? <span className="text-zinc-600 ml-2 border-l border-zinc-800 pl-2">RIR {s.rir}</span> : ''}
+                                                                        </span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* DATA SETTINGS */}
+                            {view === 'data' && (
+                                <div className="space-y-6 animate-in">
+                                    <div className="bg-[#18181b] p-8 rounded-[3.5rem] border border-zinc-800 shadow-xl space-y-8 text-center">
+                                        <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter text-left">Settings</h3>
+                                        <div className="space-y-4 text-left">
+                                            <div className="flex justify-between items-center"><label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Gemini API Key</label><button onClick={() => setIsLocked(!isLocked)} className={`p-2 rounded-xl border transition-all ${isLocked ? 'bg-zinc-900 text-zinc-500 border-zinc-800' : 'bg-[#d4f04d]/20 text-[#d4f04d] border-[#d4f04d]/30'}`}>{isLocked ? <Icons.Lock size={14}/> : <Icons.Unlock size={14}/>}</button></div>
+                                            <div className="relative"><input type={isLocked ? "password" : "text"} value={apiKey} onChange={e => setApiKey(e.target.value)} disabled={isLocked} placeholder="Paste API Key here..." className="w-full bg-black p-5 rounded-2xl border border-zinc-800 text-zinc-400 outline-none focus:border-[#d4f04d] transition-all text-xs" />{!isLocked && <button onClick={() => { setIsLocked(true); alert("API Key Saved & Locked!"); }} className="absolute right-2 top-2 p-3 bg-[#d4f04d] text-black rounded-xl active:scale-95 shadow-lg"><Icons.Save size={18}/></button>}</div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 border-t border-zinc-900 pt-6">
+                                            <button onClick={() => { const d = JSON.stringify({logs, routines, favorites}); const b = new Blob([d], {type: 'application/json'}); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'FitGenius_Backup.json'; a.click(); }} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex flex-col items-center gap-3 active:scale-95 transition-transform"><Icons.Download size={24} className="text-[#d4f04d]"/><span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Backup</span></button>
+                                            <label className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex flex-col items-center gap-3 cursor-pointer active:scale-95 transition-transform"><Icons.Upload size={24} className="text-blue-500"/><span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Restore</span><input type="file" accept=".json" onChange={e => { const f = e.target.files[0]; if(!f) return; const r = new FileReader(); r.onload = ev => { try { const p = JSON.parse(ev.target.result); if(p.logs) setLogs(p.logs); if(p.routines) setRoutines(p.routines); if(p.favorites) setFavorites(p.favorites); alert("ข้อมูลถูกนำเข้าสำเร็จ!"); } catch(err) { alert("ไฟล์ไม่ถูกต้อง"); } }; r.readAsText(f); }} className="hidden"/></label>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </main>
+
+                        {/* Navigation Bar */}
+                        {!activeSession && (
+                            <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#18181b]/95 backdrop-blur-xl border border-zinc-800 p-3 rounded-[3rem] flex justify-around gap-2 z-50 shadow-[0_20px_40px_rgba(0,0,0,0.8)]">
+                                {[ { id: 'home', icon: Icons.Home }, { id: 'train', icon: Icons.Layers }, { id: 'history', icon: Icons.History }, { id: 'stats', icon: Icons.Chart }, { id: 'data', icon: Icons.Settings } ].map(item => (
+                                    <button key={item.id} onClick={() => setView(item.id)} className={`flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ${view === item.id ? 'bg-[#d4f04d] text-black shadow-lg scale-110 -translate-y-2' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                                        {item.icon({ size: 20, strokeWidth: view === item.id ? 3 : 2 })}
+                                    </button>
+                                ))}
+                            </nav>
+                        )}
+
+                        {/* --- MODALS --- */}
+                        {picker && picker.targetId !== 'live' && (
+                            <div className="fixed inset-0 bg-[#09090b] z-[600] flex flex-col p-8 pt-16 overflow-hidden animate-in">
+                                <div className="flex justify-between items-center mb-10 shrink-0"><h2 className="text-3xl font-black italic uppercase text-white tracking-tighter leading-none">Select Moves</h2><div className="flex gap-3"><button onClick={() => setPicker(null)} className="text-zinc-700 font-black uppercase text-[10px]">Cancel</button><button onClick={() => { setRoutines(p => p.map(rt => rt.id === picker.targetId ? {...rt, exercises: [...(rt.exercises||[]), ...picker.selectedIds.map(id => ({id, rest: 120}))]} : rt)); setPicker(null); }} disabled={(picker.selectedIds||[]).length === 0} className="bg-[#d4f04d] text-black font-black uppercase text-[10px] px-6 py-3 rounded-2xl disabled:opacity-30 active:scale-95 shadow-lg">Add ({(picker.selectedIds||[]).length})</button></div></div>
+                                <div className="flex-1 overflow-y-auto space-y-4 pb-32 no-scrollbar">
+                                    {allDB.map(ex => {
+                                        const isS = (picker.selectedIds||[]).includes(ex.id);
+                                        const inR = (routines||[]).find(r => r.id === picker.targetId)?.exercises?.some(e => e.id === ex.id);
+                                        return (<div key={ex.id} onClick={() => !inR && setPicker(p => ({...p, selectedIds: isS ? p.selectedIds.filter(i => i !== ex.id) : [...p.selectedIds, ex.id]}))} className={`bg-[#18181b] p-6 rounded-[2.5rem] border flex justify-between items-center transition-all ${isS ? 'border-[#d4f04d] bg-[#d4f04d]/5 scale-[0.98]' : 'border-zinc-800'} ${inR ? 'opacity-30' : 'cursor-pointer active:scale-95'}`}><div className="flex-1 pr-4"><p className={`font-black text-xl uppercase italic leading-none ${isS ? 'text-[#d4f04d]' : 'text-white'}`}>{ex.name}</p><p className="text-[8px] text-zinc-600 font-black uppercase mt-2 tracking-widest">{ex.muscle} {inR && '• ALREADY ADDED'}</p></div><div className={`w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all ${isS ? 'bg-[#d4f04d] border-transparent text-black' : 'border-zinc-800 text-zinc-800'}`}>{isS ? <Icons.Check size={18} strokeWidth={4}/> : <Icons.Plus size={18}/>}</div></div>);
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {modal === 'create' && (<div className="fixed inset-0 bg-black/90 z-[600] flex items-center justify-center p-8 backdrop-blur-md animate-in"><div className="bg-[#18181b] p-8 rounded-[3.5rem] w-full border border-zinc-800 shadow-2xl space-y-6"><h3 className="text-xl font-black text-[#d4f04d] uppercase italic text-center tracking-tighter">New Program</h3><input autoFocus type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="Name (e.g. Pull Day)..." className="w-full bg-black p-5 rounded-2xl border border-zinc-800 text-white font-black italic outline-none focus:border-[#d4f04d]" /><div className="flex flex-col gap-3"><button onClick={() => { if(formName.trim()){ setRoutines(p=>[{id:'p_'+Date.now(), name:formName.trim(), exercises:[]}, ...(p||[])]); setFormName(''); setModal(null); } }} className="bg-[#d4f04d] text-black py-5 rounded-[2rem] font-black uppercase text-xs active:scale-95 shadow-xl">Create</button><button onClick={() => setModal(null)} className="text-zinc-700 font-black uppercase text-[9px] py-2 text-center tracking-widest">Cancel</button></div></div></div>)}
+                        
+                        {/* 🧠 AI Analysis Report (เจาะลึกแบบใหม่) */}
+                        {(analysisResult || isAnalyzing) && (
+                            <div className="fixed inset-0 bg-black/95 z-[700] flex items-center justify-center p-5 backdrop-blur-md animate-in overflow-hidden">
+                                <div className="bg-[#18181b] p-6 rounded-[3rem] w-full max-w-md border border-zinc-800 shadow-2xl flex flex-col max-h-[85vh]">
+                                    <div className="flex justify-between items-start mb-4 shrink-0">
+                                        <div className="flex items-center gap-3 text-blue-400">
+                                            <Icons.Brain size={24} className={isAnalyzing ? "animate-pulse" : ""}/>
+                                            <h3 className="text-lg font-black uppercase italic leading-none tracking-tighter">AI Coach Report</h3>
+                                        </div>
+                                        {!isAnalyzing && <button onClick={() => setAnalysisResult(null)} className="text-zinc-600 hover:text-white bg-zinc-900 p-2 rounded-full"><Icons.X size={16}/></button>}
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto space-y-6 pr-2 no-scrollbar">
+                                        {isAnalyzing ? (
+                                            <div className="py-20 text-center flex flex-col items-center">
+                                                <div className="w-12 h-12 border-4 border-[#d4f04d]/20 border-t-[#d4f04d] rounded-full animate-spin mb-4"></div>
+                                                <p className="text-zinc-500 font-black uppercase tracking-widest text-[9px]">Coach is checking your sets...</p>
+                                            </div>
+                                        ) : (
+                                            <div className="animate-in space-y-6">
+                                                <div className="flex gap-4">
+                                                    <div className="bg-zinc-900 p-5 rounded-3xl border border-zinc-800 text-center relative overflow-hidden flex-1">
+                                                        <p className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Score</p>
+                                                        <h4 className={`text-4xl font-black italic tracking-tighter ${analysisResult.score >= 80 ? 'text-[#d4f04d]' : 'text-blue-400'}`}>{analysisResult.score}</h4>
+                                                        <Icons.Award className="absolute -right-3 -bottom-3 text-white/5" size={60} />
+                                                    </div>
+                                                    <div className="bg-[#d4f04d]/5 border border-[#d4f04d]/20 p-5 rounded-3xl flex-[2] flex flex-col justify-center">
+                                                        <div className="flex items-center gap-1.5 text-[#d4f04d] mb-1.5"><Icons.Target size={12}/><span className="text-[9px] font-black uppercase tracking-widest">Next Action</span></div>
+                                                        <p className="text-xs font-bold text-white leading-snug">{analysisResult.recommendation}</p>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-2 text-zinc-500"><Icons.Activity size={14}/><span className="text-[9px] font-black uppercase tracking-widest">Deep Dive Breakdown</span></div>
+                                                    {/* กล่องแสดงข้อความ Markdown จาก AI */}
+                                                    <div className="text-xs leading-relaxed text-zinc-300 font-medium whitespace-pre-wrap bg-black p-5 rounded-3xl border border-zinc-800/50">
+                                                        {analysisResult.content}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {!isAnalyzing && <button onClick={() => setAnalysisResult(null)} className="w-full mt-4 bg-zinc-900 py-4 rounded-full font-black uppercase text-[10px] tracking-widest text-zinc-400 border border-zinc-800 active:scale-95 transition-all shrink-0">Dismiss</button>}
+                                </div>
+                            </div>
                         )}
                     </div>
                 );
             }
 
-            // 2. MAIN VIEWS
-            return (
-                <div className="max-w-md mx-auto min-h-screen flex flex-col relative overflow-x-hidden pb-32">
-                    <header className="p-6 sticky top-0 bg-[#09090b]/95 backdrop-blur-md z-40 border-b border-zinc-900 flex justify-between items-center">
-                        <div><h1 className="text-2xl font-black italic text-[#d4f04d] tracking-tighter">FITGENIUS</h1><p className="text-[7px] font-bold text-zinc-600 uppercase tracking-widest mt-1">Science Stable v21</p></div>
-                    </header>
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<ErrorBoundary><App /></ErrorBoundary>);
 
-                    <main className="p-5 flex-1">
-                        {view === 'home' && (
-                            <div className="space-y-8 animate-in">
-                                <div className="bg-[#18181b] p-10 rounded-[3.5rem] border border-zinc-800 shadow-2xl relative overflow-hidden flex justify-between items-end"><div className="relative z-10"><p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-2 leading-none">Total Sessions</p><h2 className="text-7xl font-black italic text-white tracking-tighter leading-none">{logs.length}</h2></div><Activity className="absolute -right-4 -bottom-4 text-[#d4f04d]/5" size={150}/></div>
-                                <div className="space-y-4">
-                                    <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-2 flex items-center gap-2"><Star size={14} className="text-[#d4f04d]"/> Favorite Programs</h3>
-                                    {(favorites || []).length === 0 ? (<div className="py-16 text-center border-2 border-dashed border-zinc-900 rounded-[3rem]"><p className="text-zinc-700 font-black uppercase text-[10px]">ไม่มีโปรแกรมโปรด</p></div>) : (<div className="grid grid-cols-1 gap-3">
-                                        {favorites.map(fid => {
-                                            const r = (routines || []).find(x => x.id === fid); if (!r) return null;
-                                            return (<button key={fid} onClick={() => startWorkout(r)} className="bg-[#d4f04d] text-black p-6 rounded-[2.5rem] flex justify-between items-center active:scale-95 transition-transform shadow-xl shadow-[#d4f04d]/10 text-left"><div><p className="font-black italic uppercase text-xl leading-none tracking-tighter">{r.name}</p><p className="text-[9px] font-black uppercase mt-2 opacity-60 tracking-widest">{r.exercises.length} Movements</p></div><TrendingUp size={28} /></button>);
-                                        })}
-                                    </div>)}
-                                </div>
-                            </div>
-                        )}
-                        
-                        {view === 'train' && (
-                            <div className="space-y-6 animate-in">
-                                <div className="flex justify-between items-center px-2"><h2 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Program Lab</h2><button onClick={() => setModal('create')} className="bg-[#d4f04d]/10 text-[#d4f04d] px-5 py-2.5 rounded-xl text-[10px] font-black border border-[#d4f04d]/20 uppercase active:scale-95">+ New Program</button></div>
-                                {(routines || []).map(r => {
-                                    const isC = (collapsed || []).includes(r.id); const isF = (favorites || []).includes(r.id);
-                                    return (
-                                        <div key={r.id} className="bg-[#18181b] rounded-[3rem] border border-zinc-800 shadow-xl overflow-hidden mb-4">
-                                            <div className="p-6 pb-4 flex justify-between items-center bg-zinc-900/30 cursor-pointer" onClick={() => setCollapsed(prev => isC ? prev.filter(x => x !== r.id) : [...(prev||[]), r.id])}>
-                                                <div className="flex items-center gap-4"><button onClick={(e) => { e.stopPropagation(); setFavorites(prev => isF ? prev.filter(x => x !== r.id) : [...(prev||[]), r.id]); }} className={`p-2 rounded-xl transition-colors ${isF ? 'text-yellow-400' : 'text-zinc-700 hover:text-zinc-400'}`}><Star size={20} fill={isF ? "currentColor" : "none"}/></button><div><h3 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">{r.name}</h3><p className="text-[9px] text-zinc-500 font-bold uppercase mt-2 tracking-widest">{r.exercises.length} Moves</p></div></div>
-                                                <div className="flex items-center gap-2"><button onClick={(e) => { e.stopPropagation(); if (confirm("ลบโปรแกรมนี้ใช่ไหม?")) setRoutines(prev => prev.filter(x => x.id !== r.id)); }} className="text-zinc-800 hover:text-red-500 p-2"><Trash size={16}/></button><div className="text-zinc-600">{isC ? <ChevronDown size={20}/> : <ChevronUp size={20}/>}</div></div>
-                                            </div>
-                                            {!isC && (
-                                                <div className="p-6 pt-2 space-y-4 animate-in">
-                                                    <div className="space-y-2">{(r.exercises || []).map((item, idx) => {
-                                                        const ex = allDB.find(e => e.id === item.id) || { name: 'Unknown' };
-                                                        return (<div key={idx} className="bg-black p-4 rounded-2xl border border-zinc-800/50 flex items-center gap-4"><div className="flex flex-col gap-1 shrink-0"><button onClick={() => { const nx = [...r.exercises]; if (idx > 0) { [nx[idx], nx[idx-1]] = [nx[idx-1], nx[idx]]; setRoutines(p => p.map(rt => rt.id === r.id ? {...rt, exercises: nx} : rt)); } }} className="text-zinc-700 hover:text-white"><ArrowUp size={16}/></button><button onClick={() => { const nx = [...r.exercises]; if (idx < nx.length - 1) { [nx[idx], nx[idx+1]] = [nx[idx+1], nx[idx]]; setRoutines(p => p.map(rt => rt.id === r.id ? {...rt, exercises: nx} : rt)); } }} className="text-zinc-700 hover:text-white"><ArrowDown size={16}/></button></div><div className="flex-1"><p className="text-xs font-black text-zinc-300 uppercase italic tracking-tighter leading-none">{ex.name}</p><div className="flex items-center gap-2 mt-2 text-[8px] text-zinc-600 font-black uppercase tracking-widest">REST: <input type="number" value={item.rest} onChange={e => { const val = parseInt(e.target.value) || 0; setRoutines(p => p.map(rt => rt.id === r.id ? { ...rt, exercises: rt.exercises.map((ei, i) => i === idx ? { ...ei, rest: val } : ei) } : rt)); }} className="bg-zinc-900 border border-zinc-800 text-[10px] text-blue-400 font-black w-12 text-center rounded px-1 outline-none" />s</div></div><button onClick={() => { const nx = [...r.exercises]; nx.splice(idx, 1); setRoutines(p => p.map(rt => rt.id === r.id ? {...rt, exercises: nx} : rt)); }} className="text-zinc-800 hover:text-red-500"><X size={18}/></button></div>);
-                                                    })}</div>
-                                                    <div className="flex gap-3 pt-2"><button onClick={() => setPicker({ targetId: r.id, selectedIds: [] })} className="flex-1 py-5 rounded-[1.8rem] bg-zinc-900 border border-zinc-800 font-black uppercase text-[10px] text-zinc-500 tracking-widest active:scale-95 transition-transform">+ Add Move</button><button onClick={() => startWorkout(r)} className="flex-[1.8] py-5 rounded-[1.8rem] bg-[#d4f04d] text-black font-black uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-transform">Start Routine</button></div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-
-                        {view === 'history' && (
-                            <div className="space-y-6 animate-in">
-                                <h2 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-2">History Records</h2>
-                                {(logs || []).length === 0 ? <p className="text-center py-20 text-zinc-700 font-black uppercase text-xs border-2 border-dashed border-zinc-900 rounded-[3rem]">ยังไม่มีประวัติการฝึก</p> : logs.map(log => (
-                                    <div key={log.id} className="bg-[#18181b] p-8 rounded-[3.5rem] border border-zinc-800 shadow-xl overflow-hidden mb-4">
-                                        <div className="flex justify-between items-start mb-6 border-b border-zinc-800/50 pb-5">
-                                            <div><h3 className="text-xl font-black text-[#d4f04d] italic uppercase tracking-tighter leading-none">{log.routineName}</h3><p className="text-[9px] text-zinc-500 font-black uppercase mt-3 tracking-widest">{log.date} • {log.durationMins} MINS</p></div>
-                                            <div className="flex items-center gap-2"><button onClick={() => runAIAnalysis(log)} disabled={isAnalyzing} className="bg-blue-600/10 text-blue-400 p-3 rounded-2xl border border-blue-600/20 active:scale-95 transition-all"><Brain size={18}/></button><button onClick={() => setLogs(p => p.filter(x => x.id !== log.id))} className="text-zinc-800 hover:text-red-500 p-3"><Trash size={18}/></button></div>
-                                        </div>
-                                        <div className="space-y-5">
-                                            {(log.exercises || []).map((ex, i) => (
-                                                <div key={i}><p className="text-[11px] font-black text-white uppercase tracking-tighter leading-none mb-3">{ex.name}</p><div className="flex flex-wrap gap-2 px-1">{(ex.sets || []).map((s, si) => (<span key={si} className="text-[9px] bg-[#09090b] px-3 py-1.5 rounded-xl text-zinc-500 border border-zinc-800 font-mono"><strong className="text-zinc-300">{s.weight}</strong>kg × <strong className="text-zinc-300">{s.reps}</strong></span>))}</div></div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {view === 'library' && (() => {
-                            // ป้องกันการแครชถ้า customEx พังตอน search
-                            const filteredLibrary = allDB.filter(ex => {
-                                const mMatch = cat === 'All' || ex.muscle === cat;
-                                const nMatch = ex.name ? String(ex.name).toLowerCase().includes(search.toLowerCase()) : false;
-                                return mMatch && nMatch;
-                            });
-                            return (
-                                <div className="space-y-6 animate-in">
-                                    <div className="flex justify-between items-center px-2"><h2 className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Library</h2><button onClick={() => setModal('custom')} className="bg-[#d4f04d] text-black px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-[#d4f04d]/20 active:scale-95">+ Add Custom</button></div>
-                                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 px-1">{MUSCLE_GROUPS.map(m => (<button key={m} onClick={() => setCat(m)} className={`px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all whitespace-nowrap ${cat === m ? 'bg-[#d4f04d] text-black border-transparent shadow-lg' : 'bg-zinc-900 text-zinc-500 border-zinc-800'}`}>{m}</button>))}</div>
-                                    <div className="bg-[#18181b] p-5 rounded-[2.5rem] border border-zinc-800 flex items-center gap-4 shadow-inner"><Search size={20} className="text-zinc-600" /><input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="bg-transparent w-full outline-none font-black italic uppercase text-lg text-white placeholder:text-zinc-800" /></div>
-                                    <div className="space-y-4">
-                                        {filteredLibrary.length === 0 ? <p className="text-center py-10 text-zinc-700 font-black uppercase text-xs">ไม่พบท่าออกกำลังกาย</p> : filteredLibrary.map(ex => (
-                                            <div key={ex.id} className="bg-[#18181b] p-6 rounded-[2.5rem] border border-zinc-800 flex justify-between items-center shadow-xl">
-                                                <div><p className="font-black text-white text-xl uppercase italic tracking-tighter leading-none">{ex.name}</p><p className="text-[9px] text-zinc-500 font-black uppercase mt-3 tracking-widest">{ex.muscle} • {ex.type}</p></div>
-                                                {String(ex.id || '').startsWith('c_') && (<button onClick={() => setCustomEx(p => p.filter(c => c.id !== ex.id))} className="text-zinc-800 hover:text-red-500 p-4 bg-zinc-900 rounded-3xl"><Trash size={18}/></button>)}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })()}
-
-                        {view === 'data' && (
-                            <div className="space-y-6 animate-in">
-                                <div className="bg-[#18181b] p-8 rounded-[3.5rem] border border-zinc-800 shadow-xl space-y-8 text-center">
-                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter text-left">Settings</h3>
-                                    <div className="space-y-4 text-left">
-                                        <div className="flex justify-between items-center"><label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Gemini API Key</label><button onClick={() => setIsLocked(!isLocked)} className={`p-2 rounded-xl border transition-all ${isLocked ? 'bg-zinc-900 text-zinc-500 border-zinc-800' : 'bg-[#d4f04d]/20 text-[#d4f04d] border-[#d4f04d]/30'}`}>{isLocked ? <Lock size={14}/> : <Unlock size={14}/>}</button></div>
-                                        <div className="relative"><input type={isLocked ? "password" : "text"} value={apiKey} onChange={e => setApiKey(e.target.value)} disabled={isLocked} placeholder="Paste key here..." className="w-full bg-black p-5 rounded-2xl border border-zinc-800 text-zinc-400 outline-none focus:border-[#d4f04d] transition-all text-xs" />{!isLocked && <button onClick={() => { setIsLocked(true); alert("API Key Saved & Locked!"); }} className="absolute right-2 top-2 p-3 bg-[#d4f04d] text-black rounded-xl active:scale-95 shadow-lg"><Save size={18}/></button>}</div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4 border-t border-zinc-900 pt-6">
-                                        <button onClick={() => { const d = JSON.stringify({logs, routines, customEx, favorites}); const b = new Blob([d], {type: 'application/json'}); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'FitGenius_Backup.json'; a.click(); }} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex flex-col items-center gap-3 active:scale-95 transition-transform"><Download size={24} className="text-[#d4f04d]"/><span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Backup</span></button>
-                                        <label className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex flex-col items-center gap-3 cursor-pointer active:scale-95 transition-transform"><Upload size={24} className="text-blue-500"/><span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Restore</span><input type="file" accept=".json" onChange={e => { const f = e.target.files[0]; if(!f) return; const r = new FileReader(); r.onload = ev => { try { const p = JSON.parse(ev.target.result); if(p.logs) setLogs(p.logs); if(p.routines) setRoutines(p.routines); if(p.customEx) setCustomEx(p.customEx); if(p.favorites) setFavorites(p.favorites); alert("ข้อมูลถูกนำเข้าสำเร็จ!"); } catch(err) { alert("ไฟล์ไม่ถูกต้อง"); } }; r.readAsText(f); }} className="hidden"/></label>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </main>
-
-                    {/* Navbar */}
-                    {!activeSession && (
-                        <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#18181b]/95 backdrop-blur-xl border border-zinc-800 p-3 rounded-[3rem] flex justify-around gap-2 z-50 shadow-[0_20px_40px_rgba(0,0,0,0.8)]">
-                            {[ { id: 'home', icon: Home }, { id: 'train', icon: Layers }, { id: 'history', icon: HistoryIcon }, { id: 'library', icon: Database }, { id: 'data', icon: Settings } ].map(item => (
-                                <button key={item.id} onClick={() => setView(item.id)} className={`flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ${view === item.id ? 'bg-[#d4f04d] text-black shadow-lg scale-110 -translate-y-2' : 'text-zinc-600 hover:text-zinc-400'}`}>
-                                    <item.icon size={20} strokeWidth={view === item.id ? 3 : 2} />
-                                </button>
-                            ))}
-                        </nav>
-                    )}
-
-                    {/* --- ALL OVERLAYS & MODALS --- */}
-                    {picker && (
-                        <div className="fixed inset-0 bg-[#09090b] z-[600] flex flex-col p-8 pt-16 overflow-hidden animate-in">
-                            <div className="flex justify-between items-center mb-10 shrink-0"><h2 className="text-3xl font-black italic uppercase text-white tracking-tighter leading-none">Select Moves</h2><div className="flex gap-3"><button onClick={() => setPicker(null)} className="text-zinc-700 font-black uppercase text-[10px]">Cancel</button><button onClick={() => { if (picker.targetId === 'live') { const nx = picker.selectedIds.map(id => { const r = allDB.find(e => e.id === id); return { id: Math.random(), refId: id, name: r.name, muscle: r.muscle, rest: 120, sets: Array(3).fill(null).map(() => ({id: Math.random(), weight: '', reps: '', rir: '', done: false, type: 'work'})) }; }); setActiveSession(p => ({...p, exercises: [...(p.exercises||[]), ...nx]})); } else { setRoutines(p => p.map(rt => rt.id === picker.targetId ? {...rt, exercises: [...(rt.exercises||[]), ...picker.selectedIds.map(id => ({id, rest: 120}))]} : rt)); } setPicker(null); }} disabled={(picker.selectedIds||[]).length === 0} className="bg-[#d4f04d] text-black font-black uppercase text-[10px] px-6 py-3 rounded-2xl disabled:opacity-30 active:scale-95 shadow-lg">Add ({(picker.selectedIds||[]).length})</button></div></div>
-                            <div className="flex-1 overflow-y-auto space-y-4 pb-32 no-scrollbar">
-                                {allDB.map(ex => {
-                                    const isS = (picker.selectedIds||[]).includes(ex.id);
-                                    const inR = picker.targetId !== 'live' && (routines||[]).find(r => r.id === picker.targetId)?.exercises?.some(e => e.id === ex.id);
-                                    return (<div key={ex.id} onClick={() => !inR && setPicker(p => ({...p, selectedIds: isS ? p.selectedIds.filter(i => i !== ex.id) : [...p.selectedIds, ex.id]}))} className={`bg-[#18181b] p-6 rounded-[2.5rem] border flex justify-between items-center transition-all ${isS ? 'border-[#d4f04d] bg-[#d4f04d]/5 scale-[0.98]' : 'border-zinc-800'} ${inR ? 'opacity-30' : 'cursor-pointer active:scale-95'}`}><div className="flex-1 pr-4"><p className={`font-black text-xl uppercase italic leading-none ${isS ? 'text-[#d4f04d]' : 'text-white'}`}>{ex.name}</p><p className="text-[8px] text-zinc-600 font-black uppercase mt-2 tracking-widest">{ex.muscle} {inR && '• ADDED'}</p></div><div className={`w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all ${isS ? 'bg-[#d4f04d] border-transparent text-black' : 'border-zinc-800 text-zinc-800'}`}>{isS ? <Check size={18} strokeWidth={4}/> : <Plus size={18}/>}</div></div>);
-                                })}
-                            </div>
-                        </div>
-                    )}
-                    {modal === 'finish' && (<div className="fixed inset-0 bg-black/95 z-[500] flex items-center justify-center p-8 backdrop-blur-md animate-in"><div className="bg-[#18181b] p-10 rounded-[3.5rem] w-full max-w-sm text-center border border-zinc-800 shadow-2xl"><h3 className="text-2xl font-black text-white uppercase italic mb-8 tracking-tighter">Session Finish?</h3><button onClick={finishWorkout} className="w-full bg-[#d4f04d] text-black py-5 rounded-[2.5rem] font-black uppercase text-xs shadow-xl shadow-[#d4f04d]/20 active:scale-95 mb-4 transition-all">DONE & SAVE</button><button onClick={() => setModal(null)} className="text-zinc-700 uppercase font-black text-[9px] tracking-widest py-2">Keep Lifting</button></div></div>)}
-                    {modal === 'create' && (<div className="fixed inset-0 bg-black/90 z-[500] flex items-center justify-center p-8 backdrop-blur-md animate-in"><div className="bg-[#18181b] p-8 rounded-[3.5rem] w-full border border-zinc-800 shadow-2xl space-y-6"><h3 className="text-xl font-black text-[#d4f04d] uppercase italic text-center tracking-tighter">New Program</h3><input autoFocus type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="Name (e.g. Pull Day)..." className="w-full bg-black p-5 rounded-2xl border border-zinc-800 text-white font-black italic outline-none focus:border-[#d4f04d]" /><div className="flex flex-col gap-3"><button onClick={() => { if(formName.trim()){ setRoutines(p=>[{id:'p_'+Date.now(), name:formName.trim(), exercises:[]}, ...(p||[])]); setFormName(''); setModal(null); } }} className="bg-[#d4f04d] text-black py-5 rounded-[2rem] font-black uppercase text-xs active:scale-95 shadow-xl">Create</button><button onClick={() => setModal(null)} className="text-zinc-700 font-black uppercase text-[9px] py-2 text-center tracking-widest">Cancel</button></div></div></div>)}
-                    {modal === 'custom' && (<div className="fixed inset-0 bg-black/90 z-[500] flex items-center justify-center p-8 backdrop-blur-md animate-in"><div className="bg-[#18181b] p-8 rounded-[3.5rem] w-full border border-zinc-800 shadow-2xl space-y-6"><h3 className="text-xl font-black text-[#d4f04d] uppercase italic text-center tracking-tighter">New Custom Move</h3><input type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="Exercise Name..." className="w-full bg-black p-5 rounded-2xl border border-zinc-800 text-white font-black italic outline-none focus:border-[#d4f04d]" /><select id="msel" className="w-full bg-black p-5 rounded-2xl border border-zinc-800 text-[#d4f04d] font-black uppercase text-xs outline-none">{MUSCLE_GROUPS.filter(m=>m!=='All').map(m => <option key={m} value={m}>{m}</option>)}</select><div className="flex flex-col gap-3 pt-4"><button onClick={() => { if(formName){ const m = document.getElementById('msel').value; setCustomEx(p=>[{id:'c_'+Date.now(), name:formName, muscle:m, type:'Custom', defaultRest: 120}, ...(p||[])]); setFormName(''); setModal(null); } }} className="bg-[#d4f04d] text-black py-5 rounded-[2rem] font-black uppercase text-xs active:scale-95 shadow-xl">Create</button><button onClick={() => setModal(null)} className="text-zinc-700 font-black uppercase text-[9px] py-2 text-center tracking-widest">Cancel</button></div></div></div>)}
-                    {(analysisResult || isAnalyzing) && (<div className="fixed inset-0 bg-black/95 z-[700] flex items-center justify-center p-6 backdrop-blur-md animate-in overflow-hidden"><div className="bg-[#18181b] p-8 rounded-[3.5rem] w-full max-w-sm border border-zinc-800 shadow-2xl flex flex-col max-h-[85vh]"><div className="flex justify-between items-start mb-6 shrink-0"><div className="flex items-center gap-3 text-blue-400"><Brain size={28} className={isAnalyzing ? "animate-pulse" : ""}/><h3 className="text-xl font-black uppercase italic leading-none tracking-tighter">Science Report</h3></div>{!isAnalyzing && <button onClick={() => setAnalysisResult(null)} className="text-zinc-600 hover:text-white"><X size={20}/></button>}</div><div className="flex-1 overflow-y-auto space-y-8 pr-2 no-scrollbar">{isAnalyzing ? (<div className="py-20 text-center flex flex-col items-center"><div className="w-16 h-16 border-4 border-[#d4f04d]/20 border-t-[#d4f04d] rounded-full animate-spin mb-6"></div><p className="text-zinc-500 font-black uppercase tracking-widest text-[9px]">Gym Bro is checking stats...</p></div>) : (<div className="animate-in fade-in space-y-8"><div className="bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-800 text-center relative overflow-hidden"><p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-2">Progress Score</p><h4 className={`text-6xl font-black italic tracking-tighter ${analysisResult.score >= 80 ? 'text-[#d4f04d]' : 'text-blue-400'}`}>{analysisResult.score}%</h4><div className="mt-4 h-2 bg-zinc-800 rounded-full overflow-hidden"><div className={`h-full transition-all duration-1000 ${analysisResult.score >= 80 ? 'bg-[#d4f04d]' : 'bg-blue-400'}`} style={{width:`${analysisResult.score}%`}}></div></div><Award className="absolute -right-4 -bottom-4 text-white/5" size={100} /></div><div className="bg-[#d4f04d]/5 border border-[#d4f04d]/20 p-5 rounded-3xl"><div className="flex items-center gap-2 text-[#d4f04d] mb-2"><Target size={14}/><span className="text-[10px] font-black uppercase tracking-widest">Next Action</span></div><p className="text-xs font-bold text-white leading-relaxed">{analysisResult.recommendation}</p></div><div className="space-y-4"><div className="flex items-center gap-2 text-zinc-500"><Activity size={14}/><span className="text-[10px] font-black uppercase tracking-widest">Analysis</span></div><div className="text-xs leading-relaxed text-zinc-400 font-medium whitespace-pre-wrap border-l border-zinc-800 pl-4 py-1">{analysisResult.content}</div></div></div>)}</div>{!isAnalyzing && <button onClick={() => setAnalysisResult(null)} className="w-full mt-6 bg-zinc-900 py-4 rounded-[2rem] font-black uppercase text-[10px] tracking-widest text-zinc-400 border border-zinc-800 active:scale-95 transition-all">Dismiss</button>}</div></div>)}
-                </div>
-            );
+        } catch (e) {
+            // Failsafe ขั้นสุดยอด ถ้าระบบ React ทำงานไม่ได้เลย
+            document.getElementById('spinner-icon').style.display = 'none';
+            document.getElementById('loading-txt').innerHTML = '<span style="color:#ef4444">ระบบหลักขัดข้อง กรุณากดรีเซ็ต</span>';
+            document.getElementById('emergency-btn').style.display = 'block';
         }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<ErrorBoundary><App /></ErrorBoundary>);
     </script>
 </body>
 </html>
